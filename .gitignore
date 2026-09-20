@@ -1,0 +1,23 @@
+# dependencies
+node_modules
+
+# next.js
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+
+# qvac model cache
+.qvac
+
+# local storage — the app's entire database
+data.json
+
+# scratch
+tmp/
+
+# env
+.env*
+
+# misc
+.DS_Store
