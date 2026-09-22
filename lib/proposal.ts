@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CourseSchema, ItemSchema, KindSchema, NoticeSchema, RoutineSlotSchema } from './schema';
+import { CourseSchema, ItemSchema, RoutineSlotSchema } from './schema';
 
 /**
  * A proposal is what /api/ingest returns and /api/confirm accepts. It is a
@@ -8,11 +8,7 @@ import { CourseSchema, ItemSchema, KindSchema, NoticeSchema, RoutineSlotSchema }
  * strict storage schemas, so a draft with a null kind or date cannot be saved.
  */
 
-/**
- * An item before saving: no id/status/createdAt yet; kind and date may be
- * unknown. Instead of an existing kindId, the user may file it under a kind
- * created in the same action ("+ Create new kind") via `newKind`.
- */
+/** A quiz, assignment or exam before saving: no id/status/createdAt yet; kind and date may be unknown. */
 export const ItemDraftSchema = ItemSchema.omit({
   id: true,
   status: true,
@@ -20,19 +16,12 @@ export const ItemDraftSchema = ItemSchema.omit({
 }).extend({
   kindId: ItemSchema.shape.kindId.nullable(),
   dueAt: ItemSchema.shape.dueAt.nullable(),
-  newKind: KindSchema.omit({ id: true }).optional(),
 });
-
-export const NoticeDraftSchema = NoticeSchema.omit({ id: true });
 
 export const ProposalSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('item'),
     items: z.array(ItemDraftSchema).min(1),
-  }),
-  z.object({
-    type: z.literal('notice'),
-    notices: z.array(NoticeDraftSchema).min(1),
   }),
   z.object({
     type: z.literal('routine'),
@@ -51,5 +40,4 @@ export function normaliseCode(code: string): string {
 }
 
 export type ItemDraft = z.infer<typeof ItemDraftSchema>;
-export type NoticeDraft = z.infer<typeof NoticeDraftSchema>;
 export type Proposal = z.infer<typeof ProposalSchema>;

@@ -1,19 +1,16 @@
-import { kindNameKey } from './change';
 import { normaliseCode, ProposalSchema } from './proposal';
 import {
   CourseSchema,
   ItemSchema,
-  KindSchema,
-  NoticeSchema,
   RoutineSlotSchema,
   type AppState,
   type Course,
   type Item,
-  type Kind,
-  type Notice,
   type RoutineSlot,
 } from './schema';
 import { newId, updateState } from './store';
+import { DATE_ONLY_TIME, isDateOnly } from './kinds';
+import { toLocalIso } from './time';
 
 /**
  * Saves a user-approved proposal. Every record is re-validated against the
@@ -41,8 +38,7 @@ export class RoutineExistsError extends Error {
 }
 
 export type ConfirmResult =
-  | { type: 'item'; items: Item[]; createdKinds: Kind[] }
-  | { type: 'notice'; notices: Notice[] }
+  | { type: 'item'; items: Item[] }
   | { type: 'routine'; courses: Course[]; slots: RoutineSlot[]; replacedSlots: number };
 
 function zodIssues(prefix: string, error: { issues: { path: PropertyKey[]; message: string }[] }) {
@@ -67,63 +63,29 @@ export async function confirmProposal(
 
     if (proposal.type === 'item') {
       const items: Item[] = [];
-      // Kinds created in this same action ("+ Create new kind"), keyed by
-      // name, so several items can share one new kind and an existing kind
-      // with the same name is reused instead of duplicated.
-      const kinds = [...state.kinds];
-      const createdKinds: Kind[] = [];
-      const kindFor = (newKind: Omit<Kind, 'id'>): Kind => {
-        const key = kindNameKey(newKind.name);
-        const existing = kinds.find((k) => kindNameKey(k.name) === key);
-        if (existing) return existing;
-        const kind = KindSchema.parse({ ...newKind, name: newKind.name.trim(), id: newId() });
-        kinds.push(kind);
-        createdKinds.push(kind);
-        return kind;
-      };
-
       proposal.items.forEach((draft, i) => {
         const at = `items[${i}]`;
-        const { newKind, ...fields } = draft;
-        let kindId = fields.kindId;
-        if (kindId === null && newKind) {
-          const kind = KindSchema.omit({ id: true }).safeParse(newKind);
-          if (kind.success) kindId = kindFor(kind.data).id;
-          else issues.push(...zodIssues(`${at}.newKind`, kind.error));
-        }
-        if (kindId === null) {
-          if (!newKind) issues.push(`${at}.kindId: choose a kind`);
-        } else if (!kindIds.has(kindId) && !createdKinds.some((k) => k.id === kindId)) {
-          issues.push(`${at}.kindId: no such kind`);
-        }
-        if (fields.courseId !== null && !courseIds.has(fields.courseId)) issues.push(`${at}.courseId: no such course`);
-        if (kindId === null) return;
-        const item = ItemSchema.safeParse({ ...fields, kindId, id: newId(), status: 'pending', createdAt: now });
+        if (draft.kindId === null) issues.push(`${at}.kindId: choose Quiz, Assignment or Exam`);
+        else if (!kindIds.has(draft.kindId)) issues.push(`${at}.kindId: no such kind`);
+        if (draft.courseId !== null && !courseIds.has(draft.courseId)) issues.push(`${at}.courseId: no such course`);
+        if (draft.kindId === null) return;
+        // Quizzes keep their calendar date only: whatever time came in, store
+        // the end of that day. The date is read as written (its own offset).
+        const kind = state.kinds.find((k) => k.id === draft.kindId);
+        const dueAt =
+          draft.dueAt && isDateOnly(kind) ? toLocalIso(draft.dueAt.slice(0, 10), DATE_ONLY_TIME) : draft.dueAt;
+        const item = ItemSchema.safeParse({ ...draft, dueAt, id: newId(), status: 'pending', createdAt: now });
         if (item.success) items.push(item.data);
         else issues.push(...zodIssues(at, item.error));
       });
       if (issues.length) throw new ConfirmError(issues);
-      result = { type: 'item', items, createdKinds };
-      return { ...state, kinds, items: [...state.items, ...items] };
-    }
-
-    if (proposal.type === 'notice') {
-      const notices: Notice[] = [];
-      proposal.notices.forEach((draft, i) => {
-        const at = `notices[${i}]`;
-        if (draft.courseId !== null && !courseIds.has(draft.courseId)) issues.push(`${at}.courseId: no such course`);
-        const notice = NoticeSchema.safeParse({ ...draft, id: newId() });
-        if (notice.success) notices.push(notice.data);
-        else issues.push(...zodIssues(at, notice.error));
-      });
-      if (issues.length) throw new ConfirmError(issues);
-      result = { type: 'notice', notices };
-      return { ...state, notices: [...state.notices, ...notices] };
+      result = { type: 'item', items };
+      return { ...state, items: [...state.items, ...items] };
     }
 
     // Routine: a new routine REPLACES the whole old one (never merges), and
     // only after the user confirmed that. Courses are upserted by id and never
-    // removed, because items and notices may still reference them.
+    // removed, because items may still reference them.
     if (state.routine.length > 0 && !options.replaceRoutine) {
       throw new RoutineExistsError(state.routine.length);
     }

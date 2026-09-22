@@ -8,11 +8,13 @@ import { modelText, parseTimeRange, parseTimetable, readingOrderText, type Timet
 import { getQvac } from './qvac';
 import { normaliseCode, type Proposal } from './proposal';
 import type { AppState, Course, Kind } from './schema';
+import { DATE_ONLY_TIME, fixedKind, isDateOnly } from './kinds';
 import { newId } from './store';
-import { DAY_NAMES, localDate, localIsoNow, toLocalIso } from './time';
+import { DAY_NAMES, localDate, toLocalIso } from './time';
 
 /**
- * Ingest pipeline: image → OCR → classify → extract → validate → proposal.
+ * Ingest pipeline: screenshot → OCR → classify (routine, or quiz/assignment/
+ * exam) → extract → validate → proposal.
  * Nothing here writes to data.json; /api/confirm is the only writer.
  *
  * Reliability rules baked in:
@@ -26,7 +28,9 @@ import { DAY_NAMES, localDate, localIsoNow, toLocalIso } from './time';
  *   text, date in the past, missing time) become warnings on the proposal.
  */
 
-export type IngestType = 'routine' | 'item' | 'notice' | 'unknown';
+export type IngestType = 'routine' | 'item' | 'unknown';
+
+const NOTHING_FOUND = 'No quiz, assignment, exam or class routine was found in this screenshot.';
 
 export type IngestTimings = { ocrMs?: number; classifyMs: number; extractMs?: number };
 
@@ -96,7 +100,7 @@ type JsonRun<T> =
   | { ok: false; error: string; rawOutput?: string; attempts: number };
 
 const OCR_NOTE =
-  'The text may come from OCR of a screenshot. Cells on the same visual row are ' +
+  'The text comes from OCR of a screenshot. Cells on the same visual row are ' +
   'separated by " | "; a timetable is rebuilt as rows of time slots with one ' +
   '"DAY:" line per class. OCR often reads a colon in a time as a period ' +
   '("11.59 PM" means 11:59 PM) and may drop dashes or split words.';
@@ -192,15 +196,14 @@ async function completeJson<T>(
 // ---------------------------------------------------------------------------
 
 const ClassifySchema = z.object({
-  type: z.enum(['routine', 'item', 'notice', 'unknown']),
+  type: z.enum(['routine', 'item', 'unknown']),
 });
 
 const CLASSIFY_SYSTEM = `You sort university screenshots into exactly one category.
 - "routine": a weekly class timetable — recurring classes laid out by day of the week and time.
-- "item": anything with a deadline or a scheduled assessment: assignments, quizzes, midterms, finals, lab reports, project submissions.
-- "notice": an announcement with no deadline: class cancelled, room changed, faculty absent, general information.
-- "unknown": none of the above, or unreadable.
-If a post announces both a deadline and other news, choose "item".`;
+- "item": the screenshot announces at least one quiz, assignment or exam with a date (assignments include homework, lab reports and projects; exams include midterms and finals).
+- "unknown": anything else — general announcements, lecture notes, class cancellations — or unreadable.
+If a post mixes a quiz, assignment or exam with other news, choose "item".`;
 
 async function classify(text: string, now: Date) {
   return completeJson(
@@ -250,25 +253,13 @@ function itemExtractSchema(kinds: Kind[]) {
           date: calendarDate.nullable(),
           time: clock.nullable(),
           syllabus: z.string(),
-          instructions: z.string(),
         }),
       )
-      .min(1),
+      // May be empty: grammar-constrained output must satisfy the schema, so
+      // requiring an entry would force the model to invent one.
+      .max(20),
   });
 }
-
-const NoticeExtractSchema = z.object({
-  notices: z
-    .array(
-      z.object({
-        text: z.string().min(1),
-        courseCode: z.string().nullable(),
-        postedDate: calendarDate.nullable(),
-        postedTime: clock.nullable(),
-      }),
-    )
-    .min(1),
-});
 
 const RoutineExtractSchema = z.object({
   courses: z
@@ -308,31 +299,17 @@ function coursesLine(courses: Course[]): string {
 }
 
 function itemPrompt(kinds: Kind[], courses: Course[], text: string, now: Date) {
-  const kindList = kinds.map((k) => `- ${k.name} (${k.mode === 'submit' ? 'submitted by a deadline' : 'attended at a time'})`).join('\n');
+  const kindList = kinds.map((k) => `- ${k.name}: ${fixedKind(k.name)?.covers ?? k.name}`).join('\n');
   return {
-    system: `You extract deadlines from university screenshots into JSON.
-One entry per distinct assignment, quiz, exam, or submission.
-- "kind": choose from the user's kinds list ONLY. If none fits, use null. Never invent a kind.
+    system: `You extract quizzes, assignments and exams from university screenshots into JSON.
+One entry per distinct quiz, assignment or exam that has a date. Skip everything else — lecture notes, topic lists, general news. If there is none, return an empty "items" list.
+- "kind": one of the listed kinds ONLY. If none fits, use null. Never invent a kind.
 - "courseCode": the course code the entry belongs to (e.g. "CSE 3103"), or null. A course named in a page header applies to every entry under it.
 - "date": YYYY-MM-DD — the submission deadline ("Due: ...") OR the scheduled date of a quiz/exam ("On: ...", "at ..."). If the year is not written, use the year that puts the date closest to today. null if no date is given.
 - "time": 24-hour HH:MM of that deadline or start time (5:00 PM → 17:00, 11:59 PM → 23:59). null if no time is given.
 - "syllabus": chapters/topics covered, else "".
-- "instructions": rules like "bring calculator", "PDF only", "no late submission", else "". Attach a note to the entry it refers to.
 Copy facts from the text only. Do not guess missing values — use null or "".`,
-    user: `${todayLine(now)}\n${OCR_NOTE}\n\nThe user's kinds:\n${kindList || '(none)'}\n\n${coursesLine(courses)}\n\nText:\n"""\n${text}\n"""`,
-  };
-}
-
-function noticePrompt(courses: Course[], text: string, now: Date) {
-  return {
-    system: `You extract announcements (no deadlines) from university screenshots into JSON.
-One entry per distinct announcement.
-- "text": the announcement in one or two plain sentences, keeping every concrete detail (dates, rooms, times).
-- "courseCode": the course it concerns, or null.
-- "postedDate": YYYY-MM-DD when it was posted, if shown (resolve "Today"/"Yesterday" from today's date), else null.
-- "postedTime": 24-hour HH:MM when it was posted, if shown, else null.
-Copy facts from the text only. Do not guess missing values — use null.`,
-    user: `${todayLine(now)}\n${OCR_NOTE}\n\n${coursesLine(courses)}\n\nText:\n"""\n${text}\n"""`,
+    user: `${todayLine(now)}\n${OCR_NOTE}\n\nKinds:\n${kindList || '(none)'}\n\n${coursesLine(courses)}\n\nText:\n"""\n${text}\n"""`,
   };
 }
 
@@ -383,7 +360,9 @@ function slotsFromGrid(
         day: DAYS[cell.day],
         startTime: range.start,
         endTime: range.end,
-        room: course.room,
+        // Empty = "the course's room". Copying it here would leave a stale
+        // duplicate when the user corrects the course's room before saving.
+        room: '',
       });
     }
   }
@@ -411,11 +390,6 @@ function findCourse(courses: Course[], code: string | null): Course | undefined 
   return courses.find((c) => normaliseCode(c.code) === key);
 }
 
-/** Lowercase letters and digits only: "Lab Report" matches "lab-report 4". */
-function squash(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
 const MIDNIGHT = /\b(12[:.]00\s*a\.?m|00[:.]00|midnight)\b/i;
 
 function itemsToProposal(
@@ -431,10 +405,10 @@ function itemsToProposal(
     const kind = it.kind ? state.kinds.find((k) => k.name === it.kind) : undefined;
     if (!kind) {
       warnings.push(`${at}: no matching kind — choose one before saving`);
-    } else if (!squash(sourceText).includes(squash(kind.name))) {
-      // The model picked a kind the text never names — e.g. lecture notes
-      // labelled "Midterm". Could be a fair inference, could be invented.
-      warnings.push(`${at}: kind "${kind.name}" is not mentioned in the text — check this entry is real`);
+    } else if (!(fixedKind(kind.name)?.evidence ?? new RegExp(kind.name, 'i')).test(sourceText)) {
+      // Nothing in the text supports this kind (no "quiz", "midterm",
+      // "assignment"...). Could be a fair inference, could be invented.
+      warnings.push(`${at}: nothing in the text says this is a ${kind.name.toLowerCase()} — check this entry is real`);
     }
 
     const course = findCourse(state.courses, it.courseCode);
@@ -444,7 +418,10 @@ function itemsToProposal(
 
     let dueAt: string | null = null;
     if (!it.date) {
-      warnings.push(`${at}: no due date found — set dueAt before saving`);
+      warnings.push(`${at}: no date found — set it before saving`);
+    } else if (isDateOnly(kind)) {
+      // Quizzes are tracked by date only; any time the model read is dropped.
+      dueAt = toLocalIso(it.date, DATE_ONLY_TIME);
     } else {
       // Small models fill a missing time with "00:00" instead of null. Treat
       // midnight as missing unless the text actually says midnight.
@@ -454,11 +431,13 @@ function itemsToProposal(
         warnings.push(`${at}: no time in the text — assumed 23:59, check it`);
       }
       dueAt = toLocalIso(it.date, time ?? '23:59');
+    }
+    if (it.date) {
       const year = it.date.slice(0, 4);
       if (!sourceText.includes(year)) {
         warnings.push(`${at}: year ${year} is not in the text — it was inferred`);
       }
-      if (it.date < today) warnings.push(`${at}: due date ${it.date} is in the past`);
+      if (it.date < today) warnings.push(`${at}: the date ${it.date} is in the past`);
     }
 
     return {
@@ -467,36 +446,10 @@ function itemsToProposal(
       title: it.title,
       dueAt,
       syllabus: it.syllabus,
-      instructions: it.instructions,
       sourceText,
     };
   });
   return { type: 'item', items };
-}
-
-function noticesToProposal(
-  out: z.infer<typeof NoticeExtractSchema>,
-  state: AppState,
-  sourceText: string,
-  now: Date,
-  warnings: string[],
-): Proposal {
-  const notices = out.notices.map((n, i) => {
-    const at = `notices[${i}]`;
-    const course = findCourse(state.courses, n.courseCode);
-    if (n.courseCode && !course) {
-      warnings.push(`${at}: course "${n.courseCode}" is not saved yet — left unlinked`);
-    }
-    let postedAt: string;
-    if (n.postedDate) {
-      postedAt = toLocalIso(n.postedDate, n.postedTime ?? '00:00');
-    } else {
-      postedAt = localIsoNow(now);
-      warnings.push(`${at}: no post date shown — using now`);
-    }
-    return { text: n.text, courseId: course?.id ?? null, postedAt, sourceText };
-  });
-  return { type: 'notice', notices };
 }
 
 function routineToProposal(
@@ -568,13 +521,13 @@ function routineToProposal(
 // ---------------------------------------------------------------------------
 
 export async function runIngest(
-  input: { sourceText: string; modelText?: string; timetable?: Timetable | null; ocrMs?: number },
+  input: { sourceText: string; modelText: string; timetable: Timetable | null; ocrMs: number },
   state: AppState,
 ): Promise<IngestResult> {
   const now = new Date();
   const { sourceText } = input;
-  // What the model reads: layout-rebuilt OCR text, or the pasted text as-is.
-  const text = input.modelText ?? sourceText;
+  // What the model reads: the layout-rebuilt, OCR-corrected text.
+  const text = input.modelText;
   const timings: IngestTimings = { ocrMs: input.ocrMs, classifyMs: 0 };
 
   let t = Date.now();
@@ -586,7 +539,7 @@ export async function runIngest(
   const type = cls.value.type;
   console.log(`[ingest] classified as "${type}" in ${timings.classifyMs}ms`);
   if (type === 'unknown') {
-    return { ok: false, type, sourceText, error: 'not recognised as a routine, deadline, or announcement', attempts: cls.attempts, timings };
+    return { ok: false, type, sourceText, error: NOTHING_FOUND, attempts: cls.attempts, timings };
   }
 
   const warnings: string[] = [];
@@ -597,16 +550,11 @@ export async function runIngest(
     const p = itemPrompt(state.kinds, state.courses, text, now);
     const run = await completeJson(itemExtractSchema(state.kinds), p.system, p.user, 1500);
     timings.extractMs = Date.now() - t;
-    result = run.ok
-      ? { ok: true, type, sourceText, proposal: itemsToProposal(run.value, state, sourceText, now, warnings), warnings, attempts: run.attempts, timings }
-      : { ok: false, type, sourceText, error: run.error, rawOutput: run.rawOutput, attempts: run.attempts, timings };
-  } else if (type === 'notice') {
-    const p = noticePrompt(state.courses, text, now);
-    const run = await completeJson(NoticeExtractSchema, p.system, p.user, 800);
-    timings.extractMs = Date.now() - t;
-    result = run.ok
-      ? { ok: true, type, sourceText, proposal: noticesToProposal(run.value, state, sourceText, now, warnings), warnings, attempts: run.attempts, timings }
-      : { ok: false, type, sourceText, error: run.error, rawOutput: run.rawOutput, attempts: run.attempts, timings };
+    result = !run.ok
+      ? { ok: false, type, sourceText, error: run.error, rawOutput: run.rawOutput, attempts: run.attempts, timings }
+      : run.value.items.length === 0
+        ? { ok: false, type, sourceText, error: NOTHING_FOUND, attempts: run.attempts, timings }
+        : { ok: true, type, sourceText, proposal: itemsToProposal(run.value, state, sourceText, now, warnings), warnings, attempts: run.attempts, timings };
   } else {
     const grid = input.timetable?.rows.some((r) => r.classes.length) ? input.timetable : undefined;
     if (grid) {

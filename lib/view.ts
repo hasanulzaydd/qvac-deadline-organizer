@@ -1,9 +1,16 @@
+import { isDateOnly } from './kinds';
 import { normaliseCode } from './proposal';
 import type { Course, Item, Kind } from './schema';
+import { formatDate, formatDateTime } from './time';
 
 /** A kind's mode only changes wording: "Due" for submissions, "At" for sit-in exams. */
 export function dueWord(kind: Kind | undefined): string {
   return kind?.mode === 'attend' ? 'At' : 'Due';
+}
+
+/** "On Wed 21 Oct" for date-only kinds (quizzes), else "Due Wed 14 Oct, 11:59 PM". */
+export function formatDue(iso: string, kind: Kind | undefined): string {
+  return isDateOnly(kind) ? `On ${formatDate(iso)}` : `${dueWord(kind)} ${formatDateTime(iso)}`;
 }
 
 export function isOverdue(item: Item, now: Date): boolean {
@@ -19,9 +26,6 @@ export function courseTitle(course: Course | undefined): string {
   if (!course?.title) return '';
   return normaliseCode(course.title) === normaliseCode(course.code) ? '' : course.title;
 }
-
-/** Swatches offered for new kinds. */
-export const KIND_COLORS = ['#2563eb', '#d97706', '#dc2626', '#7c3aed', '#059669', '#db2777', '#0891b2', '#65a30d'];
 
 // Full class strings (not built dynamically) so Tailwind can see them.
 const COURSE_TONES = [

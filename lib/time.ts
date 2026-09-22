@@ -49,6 +49,16 @@ export function formatClock(hhmm: string): string {
   return `${h % 12 || 12}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+/** ISO → "Wed 14 Oct" (the local calendar date only). */
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/** ISO timestamp → value for <input type="date"> ("2026-10-14"), or "" if none. */
+export function toDateInputValue(iso: string | null): string {
+  return iso ? localDate(new Date(iso)) : '';
+}
+
 /** ISO → "Wed 14 Oct, 11:59 PM". */
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);

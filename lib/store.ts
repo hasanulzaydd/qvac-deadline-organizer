@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { DATE_ONLY_TIME, FIXED_KINDS, LEGACY_KIND_MAP, isDateOnly } from './kinds';
+import { toLocalIso } from './time';
 import { AppStateSchema, type AppState, type Kind } from './schema';
 
 /**
@@ -35,24 +37,82 @@ export function newId(): string {
   return randomUUID();
 }
 
-const DEFAULT_KINDS: ReadonlyArray<Omit<Kind, 'id'>> = [
-  { name: 'Assignment', mode: 'submit', color: '#2563eb' },
-  { name: 'Quiz', mode: 'attend', color: '#d97706' },
-  { name: 'Midterm', mode: 'attend', color: '#dc2626' },
-  { name: 'Final', mode: 'attend', color: '#7c3aed' },
-  { name: 'Lab Report', mode: 'submit', color: '#059669' },
-];
-
 function seedState(): AppState {
   return {
     version: 1,
-    kinds: DEFAULT_KINDS.map((k) => ({ id: newId(), ...k })),
+    kinds: FIXED_KINDS.map(({ name, mode, color }) => ({ id: newId(), name, mode, color })),
     courses: [],
     items: [],
-    notices: [],
     routine: [],
   };
 }
+
+/**
+ * Brings an older data file to exactly the three fixed kinds. A kind whose
+ * name already matches keeps its id (so its items need no change); any other
+ * kind's items move to the fixed kind it maps to, and that kind is dropped.
+ * Returns null when the file is already up to date.
+ */
+function migrateKinds(state: AppState): AppState | null {
+  const byName = new Map(state.kinds.map((k) => [k.name.trim().toLowerCase(), k]));
+  const kinds: Kind[] = FIXED_KINDS.map(({ name, mode, color }) => ({
+    id: byName.get(name.toLowerCase())?.id ?? newId(),
+    name,
+    mode,
+    color,
+  }));
+  const idByName = new Map(kinds.map((k) => [k.name, k.id]));
+  const remap = new Map<string, string>();
+  for (const old of state.kinds) {
+    const target = LEGACY_KIND_MAP[old.name.trim().toLowerCase()] ?? 'Assignment';
+    remap.set(old.id, idByName.get(target)!);
+  }
+  const next: AppState = {
+    ...state,
+    kinds,
+    items: state.items.map((i) => ({ ...i, kindId: remap.get(i.kindId) ?? i.kindId })),
+  };
+  return JSON.stringify(next) === JSON.stringify(state) ? null : next;
+}
+
+/**
+ * Quizzes are date-only. Items saved before that rule may carry a time; move
+ * them to the end of their calendar day. Returns null when nothing changes.
+ */
+function migrateDateOnly(state: AppState): AppState | null {
+  const dateOnlyIds = new Set(state.kinds.filter((k) => isDateOnly(k)).map((k) => k.id));
+  let changed = false;
+  const items = state.items.map((i) => {
+    if (!dateOnlyIds.has(i.kindId)) return i;
+    const dueAt = toLocalIso(i.dueAt.slice(0, 10), DATE_ONLY_TIME);
+    if (dueAt === i.dueAt) return i;
+    changed = true;
+    return { ...i, dueAt };
+  });
+  return changed ? { ...state, items } : null;
+}
+
+/**
+ * A class whose room just repeats its course's room stores "" instead, so it
+ * follows the course when the room is corrected. Returns null when unchanged.
+ */
+function migrateSlotRooms(state: AppState): AppState | null {
+  const roomOf = new Map(state.courses.map((c) => [c.id, c.room]));
+  let changed = false;
+  const routine = state.routine.map((s) => {
+    if (!s.room || s.room !== roomOf.get(s.courseId)) return s;
+    changed = true;
+    return { ...s, room: '' };
+  });
+  return changed ? { ...state, routine } : null;
+}
+
+/** Applied in order on every load; each returns null when it has nothing to do. */
+const MIGRATIONS: ReadonlyArray<[string, (s: AppState) => AppState | null]> = [
+  ['fixed kinds', migrateKinds],
+  ['date-only quizzes', migrateDateOnly],
+  ['class rooms follow their course', migrateSlotRooms],
+];
 
 // The queue lives on globalThis so a hot reload in dev does not create a
 // second, independent queue racing the first against the same file.
@@ -190,7 +250,20 @@ async function loadOrSeed(): Promise<AppState> {
   }
 
   const existing = await readFromDisk();
-  if (existing) return existing;
+  if (existing) {
+    let state = existing;
+    const applied: string[] = [];
+    for (const [name, migrate] of MIGRATIONS) {
+      const next = migrate(state);
+      if (next) {
+        state = next;
+        applied.push(name);
+      }
+    }
+    if (!applied.length) return existing;
+    console.log(`[store] migrated ${DATA_FILE}: ${applied.join(', ')}`);
+    return writeToDisk(state);
+  }
 
   const seeded = await writeToDisk(seedState());
   console.log(`[store] created ${DATA_FILE} with ${seeded.kinds.length} default kinds`);

@@ -34,29 +34,19 @@ export const CourseSchema = z.object({
   isLab: z.boolean(),
 });
 
-/** One type for assignments, quizzes, midterms, finals — the kind tells them apart. */
+/** One type for quizzes, assignments and exams — the kind tells them apart. */
 export const ItemSchema = z.object({
   id,
-  /** References Kind.id, never the name, so renaming a kind orphans nothing. */
+  /** References Kind.id, never the name. */
   kindId: id,
   courseId: id.nullable(),
   title: z.string().trim().min(1),
   dueAt: isoTimestamp,
   syllabus: z.string(),
-  instructions: z.string(),
-  /** Raw OCR/pasted text, always kept so a misread can be checked later. */
+  /** Raw OCR text, always kept so a misread can be checked later. */
   sourceText: z.string(),
   status: z.enum(['pending', 'done']),
   createdAt: isoTimestamp,
-});
-
-/** Announcements with no deadline: class cancelled, room changed. */
-export const NoticeSchema = z.object({
-  id,
-  text: z.string().trim().min(1),
-  courseId: id.nullable(),
-  postedAt: isoTimestamp,
-  sourceText: z.string(),
 });
 
 export const RoutineSlotSchema = z
@@ -81,7 +71,6 @@ export const AppStateSchema = z.object({
   kinds: z.array(KindSchema),
   courses: z.array(CourseSchema),
   items: z.array(ItemSchema),
-  notices: z.array(NoticeSchema),
   routine: z.array(RoutineSlotSchema),
 });
 
@@ -90,6 +79,5 @@ export type KindMode = Kind['mode'];
 export type Course = z.infer<typeof CourseSchema>;
 export type Item = z.infer<typeof ItemSchema>;
 export type ItemStatus = Item['status'];
-export type Notice = z.infer<typeof NoticeSchema>;
 export type RoutineSlot = z.infer<typeof RoutineSlotSchema>;
 export type AppState = z.infer<typeof AppStateSchema>;

@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, state });
   } catch (err) {
     if (err instanceof ApplyError) {
-      return NextResponse.json({ ok: false, error: err.message, ...err.detail }, { status: err.status });
+      return NextResponse.json({ ok: false, error: err.message }, { status: err.status });
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error('[apply] failed:', err);
