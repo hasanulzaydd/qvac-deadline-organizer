@@ -1,12 +1,15 @@
+import { kindNameKey } from './change';
 import { normaliseCode, ProposalSchema } from './proposal';
 import {
   CourseSchema,
   ItemSchema,
+  KindSchema,
   NoticeSchema,
   RoutineSlotSchema,
   type AppState,
   type Course,
   type Item,
+  type Kind,
   type Notice,
   type RoutineSlot,
 } from './schema';
@@ -38,7 +41,7 @@ export class RoutineExistsError extends Error {
 }
 
 export type ConfirmResult =
-  | { type: 'item'; items: Item[] }
+  | { type: 'item'; items: Item[]; createdKinds: Kind[] }
   | { type: 'notice'; notices: Notice[] }
   | { type: 'routine'; courses: Course[]; slots: RoutineSlot[]; replacedSlots: number };
 
@@ -64,18 +67,44 @@ export async function confirmProposal(
 
     if (proposal.type === 'item') {
       const items: Item[] = [];
+      // Kinds created in this same action ("+ Create new kind"), keyed by
+      // name, so several items can share one new kind and an existing kind
+      // with the same name is reused instead of duplicated.
+      const kinds = [...state.kinds];
+      const createdKinds: Kind[] = [];
+      const kindFor = (newKind: Omit<Kind, 'id'>): Kind => {
+        const key = kindNameKey(newKind.name);
+        const existing = kinds.find((k) => kindNameKey(k.name) === key);
+        if (existing) return existing;
+        const kind = KindSchema.parse({ ...newKind, name: newKind.name.trim(), id: newId() });
+        kinds.push(kind);
+        createdKinds.push(kind);
+        return kind;
+      };
+
       proposal.items.forEach((draft, i) => {
         const at = `items[${i}]`;
-        if (draft.kindId === null) issues.push(`${at}.kindId: choose a kind`);
-        else if (!kindIds.has(draft.kindId)) issues.push(`${at}.kindId: no such kind`);
-        if (draft.courseId !== null && !courseIds.has(draft.courseId)) issues.push(`${at}.courseId: no such course`);
-        const item = ItemSchema.safeParse({ ...draft, id: newId(), status: 'pending', createdAt: now });
+        const { newKind, ...fields } = draft;
+        let kindId = fields.kindId;
+        if (kindId === null && newKind) {
+          const kind = KindSchema.omit({ id: true }).safeParse(newKind);
+          if (kind.success) kindId = kindFor(kind.data).id;
+          else issues.push(...zodIssues(`${at}.newKind`, kind.error));
+        }
+        if (kindId === null) {
+          if (!newKind) issues.push(`${at}.kindId: choose a kind`);
+        } else if (!kindIds.has(kindId) && !createdKinds.some((k) => k.id === kindId)) {
+          issues.push(`${at}.kindId: no such kind`);
+        }
+        if (fields.courseId !== null && !courseIds.has(fields.courseId)) issues.push(`${at}.courseId: no such course`);
+        if (kindId === null) return;
+        const item = ItemSchema.safeParse({ ...fields, kindId, id: newId(), status: 'pending', createdAt: now });
         if (item.success) items.push(item.data);
         else issues.push(...zodIssues(at, item.error));
       });
       if (issues.length) throw new ConfirmError(issues);
-      result = { type: 'item', items };
-      return { ...state, items: [...state.items, ...items] };
+      result = { type: 'item', items, createdKinds };
+      return { ...state, kinds, items: [...state.items, ...items] };
     }
 
     if (proposal.type === 'notice') {

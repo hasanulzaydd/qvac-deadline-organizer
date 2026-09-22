@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CourseSchema, ItemSchema, NoticeSchema, RoutineSlotSchema } from './schema';
+import { CourseSchema, ItemSchema, KindSchema, NoticeSchema, RoutineSlotSchema } from './schema';
 
 /**
  * A proposal is what /api/ingest returns and /api/confirm accepts. It is a
@@ -8,7 +8,11 @@ import { CourseSchema, ItemSchema, NoticeSchema, RoutineSlotSchema } from './sch
  * strict storage schemas, so a draft with a null kind or date cannot be saved.
  */
 
-/** An item before saving: no id/status/createdAt yet; kind and date may be unknown. */
+/**
+ * An item before saving: no id/status/createdAt yet; kind and date may be
+ * unknown. Instead of an existing kindId, the user may file it under a kind
+ * created in the same action ("+ Create new kind") via `newKind`.
+ */
 export const ItemDraftSchema = ItemSchema.omit({
   id: true,
   status: true,
@@ -16,6 +20,7 @@ export const ItemDraftSchema = ItemSchema.omit({
 }).extend({
   kindId: ItemSchema.shape.kindId.nullable(),
   dueAt: ItemSchema.shape.dueAt.nullable(),
+  newKind: KindSchema.omit({ id: true }).optional(),
 });
 
 export const NoticeDraftSchema = NoticeSchema.omit({ id: true });
