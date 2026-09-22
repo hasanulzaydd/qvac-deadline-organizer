@@ -42,6 +42,8 @@ export const ItemSchema = z.object({
   courseId: id.nullable(),
   title: z.string().trim().min(1),
   dueAt: isoTimestamp,
+  /** Exams only: "Midterm", "Final", "Lab exam"… — always "" for other kinds. */
+  examType: z.string().trim().default(''),
   syllabus: z.string(),
   /** Raw OCR text, always kept so a misread can be checked later. */
   sourceText: z.string(),

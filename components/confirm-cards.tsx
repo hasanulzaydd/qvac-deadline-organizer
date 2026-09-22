@@ -1,7 +1,7 @@
 'use client';
 
 import type { Course, Kind, RoutineSlot } from '@/lib/schema';
-import { DATE_ONLY_TIME, isDateOnly } from '@/lib/kinds';
+import { DATE_ONLY_TIME, examTypesFor, hasExamType, isDateOnly } from '@/lib/kinds';
 import { DAY_NAMES, fromInputValue, toDateInputValue, toInputValue, toLocalIso } from '@/lib/time';
 import { courseTitle } from '@/lib/view';
 import { Card, inputClass } from './ui';
@@ -13,11 +13,12 @@ export type ItemCardDraft = {
   kindRef: string;
   courseId: string | null;
   dueAt: string | null;
+  examType: string;
   syllabus: string;
   sourceText: string;
 };
 
-function Label({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function Label({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <span className={`mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500 ${className}`}>{children}</span>;
 }
 
@@ -33,7 +34,7 @@ function Warnings({ warnings }: { warnings: string[] }) {
 }
 
 /** Quiz, Assignment or Exam — the three fixed kinds. */
-function KindSelect({ value, kinds, onChange }: { value: string; kinds: Kind[]; onChange: (kindId: string) => void }) {
+export function KindSelect({ value, kinds, onChange }: { value: string; kinds: Kind[]; onChange: (kindId: string) => void }) {
   return (
     <select className={`${inputClass} ${value ? '' : 'border-red-300'}`} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Choose…</option>
@@ -46,7 +47,7 @@ function KindSelect({ value, kinds, onChange }: { value: string; kinds: Kind[]; 
   );
 }
 
-function CourseSelect({
+export function CourseSelect({
   value,
   courses,
   onChange,
@@ -67,6 +68,76 @@ function CourseSelect({
           </option>
         ))}
     </select>
+  );
+}
+
+/** Exam type (Midterm, Final…): free text with suggestions. Renders nothing for non-exam kinds. */
+export function ExamTypeField({
+  kind,
+  value,
+  onChange,
+}: {
+  kind: Kind | undefined;
+  value: string;
+  onChange: (examType: string) => void;
+}) {
+  const suggestions = examTypesFor(kind);
+  if (!suggestions.length) return null;
+  const listId = 'exam-type-suggestions';
+  return (
+    <label className="block">
+      <Label>Exam type</Label>
+      <input
+        className={inputClass}
+        list={listId}
+        placeholder="e.g. Midterm"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {suggestions.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+    </label>
+  );
+}
+
+/** The value after switching to `kind`: a date-only kind (Quiz) drops the time at once. */
+export function dueAtForKind(dueAt: string | null, kind: Kind | undefined): string | null {
+  return dueAt && isDateOnly(kind) ? toLocalIso(toDateInputValue(dueAt), DATE_ONLY_TIME) : dueAt;
+}
+
+/** Date field: date only for quizzes, date + time for everything else. */
+export function DueField({
+  kind,
+  value,
+  onChange,
+}: {
+  kind: Kind | undefined;
+  value: string | null;
+  onChange: (dueAt: string | null) => void;
+}) {
+  const dateOnly = isDateOnly(kind);
+  return (
+    <>
+      <Label>{dateOnly ? 'Date' : kind?.mode === 'attend' ? 'At' : 'Due'}</Label>
+      {dateOnly ? (
+        <input
+          type="date"
+          className={`${inputClass} ${value ? '' : 'border-red-300'}`}
+          value={toDateInputValue(value)}
+          onChange={(e) => onChange(e.target.value ? toLocalIso(e.target.value, DATE_ONLY_TIME) : null)}
+        />
+      ) : (
+        <input
+          type="datetime-local"
+          className={`${inputClass} ${value ? '' : 'border-red-300'}`}
+          value={toInputValue(value)}
+          onChange={(e) => onChange(fromInputValue(e.target.value))}
+        />
+      )}
+    </>
   );
 }
 
@@ -97,7 +168,6 @@ export function ItemCards({
       {drafts.map((d, i) => {
         const set = (patch: Partial<ItemCardDraft>) => onChange(i, { ...d, ...patch });
         const kind = kinds.find((k) => k.id === d.kindRef);
-        const dateOnly = isDateOnly(kind);
         const problems = itemProblems(d);
         return (
           <Card key={i} className={`p-4 ${d.include ? '' : 'opacity-50'}`}>
@@ -125,11 +195,8 @@ export function ItemCards({
                       value={d.kindRef}
                       kinds={kinds}
                       onChange={(kindRef) => {
-                        // Switching to a date-only kind (Quiz) drops the time at once.
                         const next = kinds.find((k) => k.id === kindRef);
-                        const dueAt =
-                          d.dueAt && isDateOnly(next) ? toLocalIso(toDateInputValue(d.dueAt), DATE_ONLY_TIME) : d.dueAt;
-                        set({ kindRef, dueAt });
+                        set({ kindRef, dueAt: dueAtForKind(d.dueAt, next), examType: hasExamType(next) ? d.examType : '' });
                       }}
                     />
                   </label>
@@ -138,26 +205,14 @@ export function ItemCards({
                     <CourseSelect value={d.courseId} courses={courses} onChange={(courseId) => set({ courseId })} />
                   </label>
                   <label className="block">
-                    <Label>{dateOnly ? 'Date' : kind?.mode === 'attend' ? 'At' : 'Due'}</Label>
-                    {dateOnly ? (
-                      <input
-                        type="date"
-                        className={`${inputClass} ${d.dueAt ? '' : 'border-red-300'}`}
-                        value={toDateInputValue(d.dueAt)}
-                        onChange={(e) =>
-                          set({ dueAt: e.target.value ? toLocalIso(e.target.value, DATE_ONLY_TIME) : null })
-                        }
-                      />
-                    ) : (
-                      <input
-                        type="datetime-local"
-                        className={`${inputClass} ${d.dueAt ? '' : 'border-red-300'}`}
-                        value={toInputValue(d.dueAt)}
-                        onChange={(e) => set({ dueAt: fromInputValue(e.target.value) })}
-                      />
-                    )}
+                    <DueField kind={kind} value={d.dueAt} onChange={(dueAt) => set({ dueAt })} />
                   </label>
                 </div>
+                {hasExamType(kind) && (
+                  <div className="mt-3">
+                    <ExamTypeField kind={kind} value={d.examType} onChange={(examType) => set({ examType })} />
+                  </div>
+                )}
                 <label className="mt-3 block">
                   <Label>Syllabus / topics</Label>
                   <textarea
@@ -333,6 +388,22 @@ export function RoutineCards({
             ))}
           </tbody>
         </table>
+        {courses.length > 0 && (
+          <div className="border-t border-zinc-100 px-4 py-2">
+            <button
+              type="button"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              onClick={() =>
+                onSlots([
+                  ...slots,
+                  { id: crypto.randomUUID(), courseId: courses[0].id, day: 0, startTime: '08:00', endTime: '09:20', room: '' },
+                ])
+              }
+            >
+              + Add class
+            </button>
+          </div>
+        )}
       </Card>
     </div>
   );

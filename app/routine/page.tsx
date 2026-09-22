@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { RoutineEditor } from '@/components/routine-editor';
 import { EmptyState, PageTitle, buttonClass } from '@/components/ui';
 import { readState } from '@/lib/store';
 import { DAY_SHORT, formatClock } from '@/lib/time';
@@ -10,6 +11,8 @@ export default async function RoutinePage() {
   const state = await readState();
   const today = new Date().getDay();
   const courses = new Map(state.courses.map((c) => [c.id, c]));
+  // The courses this routine uses (older courses may linger for past items).
+  const routineCourses = state.courses.filter((c) => state.routine.some((s) => s.courseId === c.id));
 
   // Rows: every distinct time slot, in start-time order.
   const slotKeys = [...new Set(state.routine.map((s) => `${s.startTime}-${s.endTime}`))].sort();
@@ -36,70 +39,72 @@ export default async function RoutinePage() {
           <Link href="/add" className="font-medium text-indigo-600">add it</Link>.
         </EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
-          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="w-32 border-b border-zinc-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Time
-                </th>
-                {DAY_SHORT.map((d, i) => (
-                  <th
-                    key={d}
-                    className={`border-b border-zinc-200 px-2 py-2 text-xs font-semibold uppercase tracking-wide ${
-                      i === today ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500'
-                    }`}
-                  >
-                    {d}
+        <RoutineEditor courses={routineCourses} slots={state.routine}>
+          <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
+            <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="w-32 border-b border-zinc-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Time
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {slotKeys.map((key) => {
-                const [start, end] = key.split('-');
-                return (
-                  <tr key={key} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-3 py-2 align-top text-xs tabular-nums text-zinc-600">
-                      {formatClock(start)}
-                      <br />
-                      <span className="text-zinc-400">{formatClock(end)}</span>
-                    </td>
-                    {DAY_SHORT.map((d, day) => {
-                      const slots = state.routine.filter(
-                        (s) => s.day === day && s.startTime === start && s.endTime === end,
-                      );
-                      return (
-                        <td key={d} className={`p-1.5 align-top ${day === today ? 'bg-indigo-50/40' : ''}`}>
-                          {slots.map((s) => {
-                            const course = courses.get(s.courseId);
-                            return (
-                              <div
-                                key={s.id}
-                                className={`rounded-lg border px-2 py-1.5 ${
-                                  course ? courseTone(course.code) : 'border-zinc-200'
-                                }`}
-                              >
-                                <div className="font-semibold leading-tight">{course?.code ?? '?'}</div>
-                                <div className="truncate text-xs opacity-75">{s.room || course?.room}</div>
-                                {(course?.section || course?.faculty) && (
-                                  <div className="truncate text-[11px] opacity-60">
-                                    {[course.section && `Sec ${course.section}`, course.faculty].filter(Boolean).join(' · ')}
-                                  </div>
-                                )}
-                                {course?.isLab && <div className="text-[10px] font-semibold uppercase opacity-60">Lab</div>}
-                              </div>
-                            );
-                          })}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  {DAY_SHORT.map((d, i) => (
+                    <th
+                      key={d}
+                      className={`border-b border-zinc-200 px-2 py-2 text-xs font-semibold uppercase tracking-wide ${
+                        i === today ? 'bg-indigo-50 text-indigo-700' : 'text-zinc-500'
+                      }`}
+                    >
+                      {d}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {slotKeys.map((key) => {
+                  const [start, end] = key.split('-');
+                  return (
+                    <tr key={key} className="border-b border-zinc-100 last:border-0">
+                      <td className="px-3 py-2 align-top text-xs tabular-nums text-zinc-600">
+                        {formatClock(start)}
+                        <br />
+                        <span className="text-zinc-400">{formatClock(end)}</span>
+                      </td>
+                      {DAY_SHORT.map((d, day) => {
+                        const slots = state.routine.filter(
+                          (s) => s.day === day && s.startTime === start && s.endTime === end,
+                        );
+                        return (
+                          <td key={d} className={`p-1.5 align-top ${day === today ? 'bg-indigo-50/40' : ''}`}>
+                            {slots.map((s) => {
+                              const course = courses.get(s.courseId);
+                              return (
+                                <div
+                                  key={s.id}
+                                  className={`rounded-lg border px-2 py-1.5 ${
+                                    course ? courseTone(course.code) : 'border-zinc-200'
+                                  }`}
+                                >
+                                  <div className="font-semibold leading-tight">{course?.code ?? '?'}</div>
+                                  <div className="truncate text-xs opacity-75">{s.room || course?.room}</div>
+                                  {(course?.section || course?.faculty) && (
+                                    <div className="truncate text-[11px] opacity-60">
+                                      {[course.section && `Sec ${course.section}`, course.faculty].filter(Boolean).join(' · ')}
+                                    </div>
+                                  )}
+                                  {course?.isLab && <div className="text-[10px] font-semibold uppercase opacity-60">Lab</div>}
+                                </div>
+                              );
+                            })}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </RoutineEditor>
       )}
     </>
   );

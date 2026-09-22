@@ -8,7 +8,7 @@ import { modelText, parseTimeRange, parseTimetable, readingOrderText, type Timet
 import { getQvac } from './qvac';
 import { normaliseCode, type Proposal } from './proposal';
 import type { AppState, Course, Kind } from './schema';
-import { DATE_ONLY_TIME, fixedKind, isDateOnly } from './kinds';
+import { DATE_ONLY_TIME, fixedKind, hasExamType, isDateOnly } from './kinds';
 import { newId } from './store';
 import { DAY_NAMES, localDate, toLocalIso } from './time';
 
@@ -252,6 +252,7 @@ function itemExtractSchema(kinds: Kind[]) {
           courseCode: z.string().nullable(),
           date: calendarDate.nullable(),
           time: clock.nullable(),
+          examType: z.string(),
           syllabus: z.string(),
         }),
       )
@@ -307,6 +308,8 @@ One entry per distinct quiz, assignment or exam that has a date. Skip everything
 - "courseCode": the course code the entry belongs to (e.g. "CSE 3103"), or null. A course named in a page header applies to every entry under it.
 - "date": YYYY-MM-DD — the submission deadline ("Due: ...") OR the scheduled date of a quiz/exam ("On: ...", "at ..."). If the year is not written, use the year that puts the date closest to today. null if no date is given.
 - "time": 24-hour HH:MM of that deadline or start time (5:00 PM → 17:00, 11:59 PM → 23:59). null if no time is given.
+- "examType": for an Exam only, the kind of exam as written, e.g. "Midterm", "Final", "Lab exam", "Viva". "" for quizzes and assignments, or if not stated.
+- "title": for an exam, name it by course and type when the text gives them (e.g. "CSE321 Midterm"), not by a section heading like "Exam Schedule".
 - "syllabus": chapters/topics covered, else "".
 Copy facts from the text only. Do not guess missing values — use null or "".`,
     user: `${todayLine(now)}\n${OCR_NOTE}\n\nKinds:\n${kindList || '(none)'}\n\n${coursesLine(courses)}\n\nText:\n"""\n${text}\n"""`,
@@ -445,6 +448,8 @@ function itemsToProposal(
       courseId: course?.id ?? null,
       title: it.title,
       dueAt,
+      // Only exams carry an exam type.
+      examType: hasExamType(kind) ? it.examType.trim() : '',
       syllabus: it.syllabus,
       sourceText,
     };

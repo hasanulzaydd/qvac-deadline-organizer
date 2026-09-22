@@ -18,10 +18,14 @@ export default async function Dashboard() {
     .filter((s) => s.day === now.getDay())
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  // Next 7 days, plus anything overdue that is still pending.
+  // Next 7 days, plus anything overdue that is still pending. Items marked
+  // done stay (struck through) until their date passes.
   const horizon = now.getTime() + 7 * 86_400_000;
   const upcoming = state.items
-    .filter((i) => i.status === 'pending' && new Date(i.dueAt).getTime() <= horizon)
+    .filter((i) => {
+      const due = new Date(i.dueAt).getTime();
+      return due <= horizon && (i.status === 'pending' || due >= now.getTime());
+    })
     .sort(byDueAt);
 
   return (

@@ -5,7 +5,7 @@ import { formatDue, isOverdue } from '@/lib/view';
 
 /** Presentational pieces with no hooks, usable from server and client components. */
 
-export function KindChip({ kind }: { kind: Kind | undefined }) {
+export function KindChip({ kind, detail }: { kind: Kind | undefined; detail?: string }) {
   if (!kind) {
     return <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">No kind</span>;
   }
@@ -16,6 +16,7 @@ export function KindChip({ kind }: { kind: Kind | undefined }) {
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: kind.color }} />
       {kind.name}
+      {detail && <span className="font-normal opacity-80">· {detail}</span>}
     </span>
   );
 }
@@ -59,12 +60,14 @@ export function ItemRow({
   course,
   now,
   leading,
+  trailing,
 }: {
   item: Item;
   kind: Kind | undefined;
   course: Course | undefined;
   now: Date;
   leading?: ReactNode;
+  trailing?: ReactNode;
 }) {
   const overdue = isOverdue(item, now);
   const done = item.status === 'done';
@@ -78,7 +81,7 @@ export function ItemRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`font-medium ${done ? 'line-through' : ''}`}>{item.title}</span>
-          <KindChip kind={kind} />
+          <KindChip kind={kind} detail={item.examType || undefined} />
           {course && <span className="text-xs font-medium text-zinc-500">{course.code}</span>}
         </div>
         <div className={`mt-0.5 text-sm ${overdue ? 'font-medium text-red-700' : 'text-zinc-600'}`}>
@@ -88,6 +91,7 @@ export function ItemRow({
         </div>
         {item.syllabus && <p className="mt-1 text-sm text-zinc-500">{item.syllabus}</p>}
       </div>
+      {trailing}
     </li>
   );
 }

@@ -9,7 +9,7 @@ import {
   type RoutineSlot,
 } from './schema';
 import { newId, updateState } from './store';
-import { DATE_ONLY_TIME, isDateOnly } from './kinds';
+import { DATE_ONLY_TIME, hasExamType, isDateOnly } from './kinds';
 import { toLocalIso } from './time';
 
 /**
@@ -74,7 +74,8 @@ export async function confirmProposal(
         const kind = state.kinds.find((k) => k.id === draft.kindId);
         const dueAt =
           draft.dueAt && isDateOnly(kind) ? toLocalIso(draft.dueAt.slice(0, 10), DATE_ONLY_TIME) : draft.dueAt;
-        const item = ItemSchema.safeParse({ ...draft, dueAt, id: newId(), status: 'pending', createdAt: now });
+        const examType = hasExamType(kind) ? draft.examType : '';
+        const item = ItemSchema.safeParse({ ...draft, dueAt, examType, id: newId(), status: 'pending', createdAt: now });
         if (item.success) items.push(item.data);
         else issues.push(...zodIssues(at, item.error));
       });

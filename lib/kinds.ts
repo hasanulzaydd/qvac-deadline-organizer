@@ -12,6 +12,8 @@ export const FIXED_KINDS: ReadonlyArray<
     evidence: RegExp;
     /** Tracked by date only — no time of day is kept or shown. */
     dateOnly?: boolean;
+    /** Suggested sub-types; a kind with these carries an exam type. */
+    examTypes?: readonly string[];
   }
 > = [
   {
@@ -35,6 +37,7 @@ export const FIXED_KINDS: ReadonlyArray<
     color: '#dc2626',
     covers: 'midterms, finals and other exams',
     evidence: /exam|mid[\s-]*term|\bmid\b|final/i,
+    examTypes: ['Midterm', 'Final', 'Lab exam', 'Viva'],
   },
 ];
 
@@ -50,6 +53,15 @@ export const DATE_ONLY_TIME = '23:59';
 
 export function isDateOnly(kind: { name: string } | undefined): boolean {
   return Boolean(kind && fixedKind(kind.name)?.dateOnly);
+}
+
+/** Suggested exam types for this kind, or [] if the kind has no exam type (quizzes, assignments). */
+export function examTypesFor(kind: { name: string } | undefined): readonly string[] {
+  return (kind && fixedKind(kind.name)?.examTypes) || [];
+}
+
+export function hasExamType(kind: { name: string } | undefined): boolean {
+  return examTypesFor(kind).length > 0;
 }
 
 /**
