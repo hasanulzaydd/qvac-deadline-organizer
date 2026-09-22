@@ -6,6 +6,7 @@ import type { Proposal } from '@/lib/proposal';
 import type { Course, Kind, RoutineSlot } from '@/lib/schema';
 import { ItemCards, RoutineCards, itemProblems, type ItemCardDraft } from './confirm-cards';
 import { Modal } from './modal';
+import { ModelStatusBanner, useModelStatus } from './model-status';
 import { Card, buttonClass } from './ui';
 
 type IngestResponse = {
@@ -69,6 +70,7 @@ export function AddFlow({
   const [saving, setSaving] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const health = useModelStatus();
 
   /** Choose (or clear) the image and its preview URL together. */
   function setFile(next: File | null) {
@@ -216,58 +218,63 @@ export function AddFlow({
   // ---------------------------------------------------------------- input
   if (stage.name === 'input' || stage.name === 'extracting') {
     const busy = stage.name === 'extracting';
+    // Until the models are loaded, extracting would just wait on the download.
+    const modelsReady = health?.ready ?? true;
     return (
-      <Card className="p-5">
-        <div
-          className={`flex min-h-48 flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 text-center ${
-            file ? 'border-indigo-300 bg-indigo-50/40' : 'border-zinc-300'
-          }`}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'));
-            if (f) setFile(f);
-          }}
-        >
-          {preview ? (
-            // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
-            <img src={preview} alt="Screenshot to read" className="max-h-64 rounded border border-zinc-200" />
-          ) : (
-            <>
-              <p className="font-medium">Drop a screenshot here, paste it (Ctrl+V), or choose an image</p>
-              <p className="mt-1 text-sm text-zinc-500">Your class routine, or a post about a quiz, assignment or exam</p>
-            </>
-          )}
-          <div className="mt-3 flex gap-2">
-            <button type="button" className={buttonClass.secondary} disabled={busy} onClick={() => fileInput.current?.click()}>
-              {file ? 'Choose another image' : 'Choose image'}
-            </button>
-            {file && (
-              <button type="button" className={buttonClass.secondary} disabled={busy} onClick={() => setFile(null)}>
-                Remove
+      <>
+        <ModelStatusBanner health={health} />
+        <Card className="p-5">
+          <div
+            className={`flex min-h-48 flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 text-center ${
+              file ? 'border-indigo-300 bg-indigo-50/40' : 'border-zinc-300'
+            }`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'));
+              if (f) setFile(f);
+            }}
+          >
+            {preview ? (
+              // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
+              <img src={preview} alt="Screenshot to read" className="max-h-64 rounded border border-zinc-200" />
+            ) : (
+              <>
+                <p className="font-medium">Drop a screenshot here, paste it (Ctrl+V), or choose an image</p>
+                <p className="mt-1 text-sm text-zinc-500">Your class routine, or a post about a quiz, assignment or exam</p>
+              </>
+            )}
+            <div className="mt-3 flex gap-2">
+              <button type="button" className={buttonClass.secondary} disabled={busy} onClick={() => fileInput.current?.click()}>
+                {file ? 'Choose another image' : 'Choose image'}
               </button>
+              {file && (
+                <button type="button" className={buttonClass.secondary} disabled={busy} onClick={() => setFile(null)}>
+                  Remove
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+  
+          <div className="mt-4 flex items-center gap-3">
+            <button type="button" className={buttonClass.primary} disabled={busy || !file || !modelsReady} onClick={extract}>
+              {busy ? 'Reading…' : 'Extract'}
+            </button>
+            {busy && (
+              <span className="text-sm text-zinc-500">
+                Reading the image on-device — {elapsed}s{elapsed < 45 ? ' (usually 15–35 s)' : ''}
+              </span>
             )}
           </div>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </div>
-
-        <div className="mt-4 flex items-center gap-3">
-          <button type="button" className={buttonClass.primary} disabled={busy || !file} onClick={extract}>
-            {busy ? 'Reading…' : 'Extract'}
-          </button>
-          {busy && (
-            <span className="text-sm text-zinc-500">
-              Reading the image on-device — {elapsed}s{elapsed < 45 ? ' (usually 15–35 s)' : ''}
-            </span>
-          )}
-        </div>
-      </Card>
+        </Card>
+      </>
     );
   }
 

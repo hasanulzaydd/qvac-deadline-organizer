@@ -45,8 +45,13 @@ Models are cached in `~/.qvac/models` by default. To keep them elsewhere, create
 npm run dev
 ```
 
-Open http://localhost:3000. The first run downloads the models (~2.6 GB); progress is
-logged in the terminal. `GET /api/health` reports when both models are ready.
+Open http://localhost:3000.
+
+**First run:** the models (~2.6 GB) start downloading as soon as the server starts.
+Progress shows in the terminal and on the **Add** page, and screenshots can be read once
+it finishes — wait for `[qvac] both models loaded` in the terminal. This happens once;
+after that the app loads the models from disk in about 20 seconds and works offline.
+`GET /api/health` reports `"ready": true` when both models are loaded.
 
 ## Data
 

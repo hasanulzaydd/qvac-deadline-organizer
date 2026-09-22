@@ -20,11 +20,20 @@ export type QvacModels = {
   llmModelId: string;
 };
 
+/** Latest download/load progress, so the UI can say what the first run is doing. */
+export type QvacProgress = {
+  model: 'ocr' | 'llm';
+  percent: number;
+  downloadedMB: number;
+  totalMB: number;
+};
+
 type QvacState = {
   ready: Promise<QvacModels> | null;
   models: QvacModels | null;
   error: string | null;
   shutdownHooked: boolean;
+  progress?: QvacProgress | null;
 };
 
 const globalWithQvac = globalThis as typeof globalThis & {
@@ -39,10 +48,16 @@ const state: QvacState = (globalWithQvac.__qvac ??= {
 });
 
 /** Per-download throttle so a multi-GB pull logs progress instead of flooding. */
-function makeProgressLogger(label: string) {
+function makeProgressLogger(label: 'ocr' | 'llm') {
   const lastLogged = new Map<string, number>();
 
   return (p: ModelProgressUpdate) => {
+    state.progress = {
+      model: label,
+      percent: p.percentage,
+      downloadedMB: Math.round(p.downloaded / 1_000_000),
+      totalMB: Math.round(p.total / 1_000_000),
+    };
     const seen = lastLogged.get(p.downloadKey) ?? -1;
     const step = Math.floor(p.percentage / 5);
     if (step <= seen && p.percentage < 100) return;
@@ -157,5 +172,7 @@ export function getQvacStatus() {
     error: state.error,
     ocrModel: OCR_LATIN.name,
     llmModel: QWEN3_4B_INST_Q4_K_M.name,
+    /** While loading: which model and how far (a first run downloads ~2.6 GB). */
+    progress: state.models ? null : (state.progress ?? null),
   };
 }
