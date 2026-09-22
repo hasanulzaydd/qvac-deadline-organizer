@@ -33,7 +33,7 @@ export default async function RoutinePage() {
       {state.routine.length === 0 ? (
         <EmptyState>
           No routine yet. Screenshot your class schedule and{' '}
-          <Link href="/add" className="font-medium text-indigo-600">add it</Link> — your courses are created from it.
+          <Link href="/add" className="font-medium text-indigo-600">add it</Link>.
         </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-sm">
@@ -74,17 +74,21 @@ export default async function RoutinePage() {
                           {slots.map((s) => {
                             const course = courses.get(s.courseId);
                             return (
-                              <Link
+                              <div
                                 key={s.id}
-                                href={course ? `/courses/${course.id}` : '/courses'}
-                                className={`block rounded-lg border px-2 py-1.5 hover:shadow-sm ${
+                                className={`rounded-lg border px-2 py-1.5 ${
                                   course ? courseTone(course.code) : 'border-zinc-200'
                                 }`}
                               >
                                 <div className="font-semibold leading-tight">{course?.code ?? '?'}</div>
                                 <div className="truncate text-xs opacity-75">{s.room || course?.room}</div>
+                                {(course?.section || course?.faculty) && (
+                                  <div className="truncate text-[11px] opacity-60">
+                                    {[course.section && `Sec ${course.section}`, course.faculty].filter(Boolean).join(' · ')}
+                                  </div>
+                                )}
                                 {course?.isLab && <div className="text-[10px] font-semibold uppercase opacity-60">Lab</div>}
-                              </Link>
+                              </div>
                             );
                           })}
                         </td>

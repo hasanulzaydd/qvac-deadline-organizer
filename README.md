@@ -1,8 +1,8 @@
 # qvac_tether
 
-A local-first student deadline organizer: screenshot a class routine or a faculty
-announcement, and on-device AI turns it into deadlines, notices and a weekly routine
-that you review and confirm before anything is saved.
+A local-first student deadline organizer. Screenshot your class routine or a post about a
+quiz, assignment or exam, and on-device AI turns it into your weekly routine or your
+deadlines — you review and confirm before anything is saved.
 
 ![Demo](demo.png)
 
@@ -12,8 +12,8 @@ All AI runs through [`@qvac/sdk`](https://www.npmjs.com/package/@qvac/sdk) **ver
 0.19.1**, called directly from Next.js route handlers:
 
 - `loadModel` — loads both models once at startup (`lib/qvac.ts`)
-- `ocr` — reads text from the uploaded screenshot (`OCR_LATIN`, EasyOCR pipeline)
-- `completion` — classifies the text and extracts structured fields, with output
+- `ocr` — reads the text in the uploaded screenshot (`OCR_LATIN`, EasyOCR pipeline)
+- `completion` — decides whether it is a routine or a quiz/assignment/exam and extracts the fields, with output
   constrained to a JSON schema (`QWEN3_4B_INST_Q4_K_M`)
 
 **All inference runs locally on your machine.** There are no cloud AI calls and no API

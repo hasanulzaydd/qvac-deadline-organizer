@@ -4,21 +4,13 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { Proposal } from '@/lib/proposal';
 import type { Course, Kind, RoutineSlot } from '@/lib/schema';
-import {
-  ItemCards,
-  NoticeCards,
-  RoutineCards,
-  itemProblems,
-  type ItemCardDraft,
-  type NoticeCardDraft,
-  type PendingKind,
-} from './confirm-cards';
+import { ItemCards, RoutineCards, itemProblems, type ItemCardDraft } from './confirm-cards';
 import { Modal } from './modal';
-import { Card, buttonClass, inputClass } from './ui';
+import { Card, buttonClass } from './ui';
 
 type IngestResponse = {
   ok: boolean;
-  type?: 'item' | 'notice' | 'routine' | 'unknown';
+  type?: 'item' | 'routine' | 'unknown';
   sourceText?: string;
   modelText?: string | null;
   proposal?: Proposal;
@@ -36,12 +28,12 @@ type Stage =
   | { name: 'failed'; result: IngestResponse }
   | { name: 'saved'; summary: string; href: string };
 
-/** Split "items[2] "Quiz": no time…" warnings onto the card they belong to. */
-function groupWarnings(warnings: string[], prefix: 'items' | 'notices') {
+/** Split 'items[2] "Quiz 3": no time…' warnings onto the card they belong to. */
+function groupWarnings(warnings: string[]) {
   const byIndex = new Map<number, string[]>();
   const general: string[] = [];
   for (const w of warnings) {
-    const m = new RegExp(`^${prefix}\\[(\\d+)\\](?: "[^"]*")?: `).exec(w);
+    const m = /^items\[(\d+)\](?: "[^"]*")?: /.exec(w);
     if (m) {
       const i = Number(m[1]);
       byIndex.set(i, [...(byIndex.get(i) ?? []), w.slice(m[0].length)]);
@@ -66,16 +58,13 @@ export function AddFlow({
   existingSlots: number;
 }) {
   const [stage, setStage] = useState<Stage>({ name: 'input' });
-  const [text, setText] = useState('');
   const [file, setFileState] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
   const [items, setItems] = useState<ItemCardDraft[]>([]);
-  const [notices, setNotices] = useState<NoticeCardDraft[]>([]);
   const [routineCourses, setRoutineCourses] = useState<Course[]>([]);
   const [routineSlots, setRoutineSlots] = useState<RoutineSlot[]>([]);
-  const [pendingKinds, setPendingKinds] = useState<PendingKind[]>([]);
   const [saveError, setSaveError] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
@@ -115,9 +104,7 @@ export function AddFlow({
     return () => window.removeEventListener('paste', onPaste);
   }, [stage.name]);
 
-  function loadProposal(result: IngestResponse) {
-    const p = result.proposal!;
-    setPendingKinds([]);
+  function loadProposal(p: Proposal) {
     setSaveError(null);
     if (p.type === 'item') {
       setItems(
@@ -128,12 +115,9 @@ export function AddFlow({
           courseId: it.courseId,
           dueAt: it.dueAt,
           syllabus: it.syllabus,
-          instructions: it.instructions,
           sourceText: it.sourceText,
         })),
       );
-    } else if (p.type === 'notice') {
-      setNotices(p.notices.map((n) => ({ include: true, ...n })));
     } else {
       setRoutineCourses(p.courses);
       setRoutineSlots(p.slots);
@@ -141,16 +125,16 @@ export function AddFlow({
   }
 
   async function extract() {
+    if (!file) return;
     const body = new FormData();
-    if (file) body.append('image', file);
-    else body.append('text', text);
+    body.append('image', file);
     setElapsed(0);
     setStage({ name: 'extracting', startedAt: Date.now() });
     try {
       const res = await fetch('/api/ingest', { method: 'POST', body });
       const result: IngestResponse = await res.json();
       if (result.ok && result.proposal) {
-        loadProposal(result);
+        loadProposal(result.proposal);
         setStage({ name: 'review', result });
       } else {
         setStage({ name: 'failed', result });
@@ -167,29 +151,14 @@ export function AddFlow({
       if (!included.length) return null;
       return {
         type: 'item',
-        items: included.map((d) => {
-          const pending = d.kindRef.startsWith('new:')
-            ? pendingKinds.find((p) => `new:${p.key}` === d.kindRef)
-            : undefined;
-          return {
-            kindId: pending || !d.kindRef ? null : d.kindRef,
-            newKind: pending ? { name: pending.name, mode: pending.mode, color: pending.color } : undefined,
-            courseId: d.courseId,
-            title: d.title.trim(),
-            dueAt: d.dueAt,
-            syllabus: d.syllabus,
-            instructions: d.instructions,
-            sourceText: d.sourceText,
-          };
-        }),
-      };
-    }
-    if (type === 'notice') {
-      const included = notices.filter((d) => d.include);
-      if (!included.length) return null;
-      return {
-        type: 'notice',
-        notices: included.map((n) => ({ text: n.text, courseId: n.courseId, postedAt: n.postedAt, sourceText: n.sourceText })),
+        items: included.map((d) => ({
+          kindId: d.kindRef || null,
+          courseId: d.courseId,
+          title: d.title.trim(),
+          dueAt: d.dueAt,
+          syllabus: d.syllabus,
+          sourceText: d.sourceText,
+        })),
       };
     }
     if (type === 'routine') return { type: 'routine', courses: routineCourses, slots: routineSlots };
@@ -223,10 +192,7 @@ export function AddFlow({
       }
       const s = data.saved;
       if (s.type === 'item') {
-        const created = s.createdKinds.length ? ` and ${plural(s.createdKinds.length, 'new kind')}` : '';
-        setStage({ name: 'saved', summary: `Saved ${plural(s.items.length, 'deadline')}${created}.`, href: '/deadlines' });
-      } else if (s.type === 'notice') {
-        setStage({ name: 'saved', summary: `Saved ${plural(s.notices.length, 'notice')}.`, href: '/' });
+        setStage({ name: 'saved', summary: `Saved ${plural(s.items.length, 'deadline')}.`, href: '/deadlines' });
       } else {
         const replaced = s.replacedSlots ? ` (replaced ${plural(s.replacedSlots, 'old class')})` : '';
         setStage({
@@ -242,7 +208,6 @@ export function AddFlow({
 
   function reset() {
     setStage({ name: 'input' });
-    setText('');
     setFile(null);
   }
 
@@ -252,7 +217,7 @@ export function AddFlow({
     return (
       <Card className="p-5">
         <div
-          className={`flex min-h-40 flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 text-center ${
+          className={`flex min-h-48 flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 text-center ${
             file ? 'border-indigo-300 bg-indigo-50/40' : 'border-zinc-300'
           }`}
           onDragOver={(e) => e.preventDefault()}
@@ -267,8 +232,8 @@ export function AddFlow({
             <img src={preview} alt="Screenshot to read" className="max-h-64 rounded border border-zinc-200" />
           ) : (
             <>
-              <p className="font-medium">Drop a screenshot, paste it (Ctrl+V), or</p>
-              <p className="mt-1 text-sm text-zinc-500">a class routine, a deadline post, or an announcement</p>
+              <p className="font-medium">Drop a screenshot here, paste it (Ctrl+V), or choose an image</p>
+              <p className="mt-1 text-sm text-zinc-500">Your class routine, or a post about a quiz, assignment or exam</p>
             </>
           )}
           <div className="mt-3 flex gap-2">
@@ -290,28 +255,13 @@ export function AddFlow({
           />
         </div>
 
-        {!file && (
-          <label className="mt-4 block">
-            <span className="mb-1 block text-sm font-medium text-zinc-700">…or paste the text</span>
-            <textarea
-              rows={5}
-              className={inputClass}
-              placeholder="e.g. CSE 3103 Quiz 3 on 21 Oct, 9:00 AM — ER diagrams"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-        )}
-
         <div className="mt-4 flex items-center gap-3">
-          <button type="button" className={buttonClass.primary} disabled={busy || (!file && !text.trim())} onClick={extract}>
+          <button type="button" className={buttonClass.primary} disabled={busy || !file} onClick={extract}>
             {busy ? 'Reading…' : 'Extract'}
           </button>
           {busy && (
             <span className="text-sm text-zinc-500">
-              {file ? 'Reading the image on-device' : 'Extracting'} — {elapsed}s
-              {file && elapsed < 45 ? ' (images usually take 15–35 s)' : ''}
+              Reading the image on-device — {elapsed}s{elapsed < 45 ? ' (usually 15–35 s)' : ''}
             </span>
           )}
         </div>
@@ -336,11 +286,10 @@ export function AddFlow({
     );
   }
 
-  // ---------------------------------------------------------------- failed
   const { result } = stage;
   const sourceBlock = result.sourceText ? (
     <details className="mt-4 text-sm">
-      <summary className="cursor-pointer font-medium text-zinc-600">Text read from the source</summary>
+      <summary className="cursor-pointer font-medium text-zinc-600">Text read from the screenshot</summary>
       <pre className="mt-2 whitespace-pre-wrap rounded-md bg-zinc-100 p-3 font-mono text-xs">{result.sourceText}</pre>
       {result.modelText && result.modelText !== result.sourceText && (
         <>
@@ -351,14 +300,15 @@ export function AddFlow({
     </details>
   ) : null;
 
+  // ---------------------------------------------------------------- failed
   if (stage.name === 'failed') {
     return (
       <Card className="p-5">
-        <p className="font-medium text-red-700">Couldn&apos;t extract anything to save.</p>
+        <p className="font-medium text-red-700">Nothing to save.</p>
         <p className="mt-1 text-sm text-zinc-600">{result.error}</p>
         {sourceBlock}
         <button type="button" className={`${buttonClass.secondary} mt-4`} onClick={reset}>
-          Try again
+          Try another screenshot
         </button>
       </Card>
     );
@@ -366,20 +316,16 @@ export function AddFlow({
 
   // ---------------------------------------------------------------- review
   const type = result.proposal!.type;
-  const { byIndex, general } = groupWarnings(result.warnings ?? [], type === 'notice' ? 'notices' : 'items');
+  const { byIndex, general } = groupWarnings(result.warnings ?? []);
   const blocked =
     type === 'item'
       ? items.every((d) => !d.include) || items.some((d) => d.include && itemProblems(d).length > 0)
-      : type === 'notice'
-        ? notices.every((d) => !d.include) || notices.some((d) => d.include && !d.text.trim())
-        : routineSlots.length === 0 || routineSlots.some((s) => s.startTime >= s.endTime);
+      : routineSlots.length === 0 || routineSlots.some((s) => s.startTime >= s.endTime);
 
   const heading =
     type === 'item'
       ? `Found ${plural(items.length, 'deadline')}`
-      : type === 'notice'
-        ? `Found ${plural(notices.length, 'notice')}`
-        : `Found a routine: ${plural(routineSlots.length, 'class')}, ${plural(routineCourses.length, 'course')}`;
+      : `Found a routine: ${plural(routineSlots.length, 'class')}, ${plural(routineCourses.length, 'course')}`;
 
   return (
     <>
@@ -406,30 +352,15 @@ export function AddFlow({
         </p>
       )}
 
-      {type === 'item' && (
+      {type === 'item' ? (
         <ItemCards
           drafts={items}
           onChange={(i, d) => setItems(items.map((x, j) => (j === i ? d : x)))}
           kinds={kinds}
           courses={courses}
-          pendingKinds={pendingKinds}
-          onCreateKind={(k) => {
-            const key = crypto.randomUUID();
-            setPendingKinds((prev) => [...prev, { key, ...k }]);
-            return key;
-          }}
           warnings={byIndex}
         />
-      )}
-      {type === 'notice' && (
-        <NoticeCards
-          drafts={notices}
-          onChange={(i, d) => setNotices(notices.map((x, j) => (j === i ? d : x)))}
-          courses={courses}
-          warnings={byIndex}
-        />
-      )}
-      {type === 'routine' && (
+      ) : (
         <RoutineCards
           courses={routineCourses}
           slots={routineSlots}
@@ -458,7 +389,7 @@ export function AddFlow({
       <Modal open={confirmReplace} title="Replace your routine?" onClose={() => setConfirmReplace(false)}>
         <p className="text-sm text-zinc-600">
           Your current routine has {plural(existingSlots, 'class')}. Saving this one removes all of them and keeps only the{' '}
-          {plural(routineSlots.length, 'class')} shown here. Your courses, deadlines and notices are kept.
+          {plural(routineSlots.length, 'class')} shown here. Your courses and deadlines are kept.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className={buttonClass.secondary} onClick={() => setConfirmReplace(false)}>

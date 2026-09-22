@@ -9,7 +9,7 @@ export default async function DeadlinesPage() {
   const pending = state.items.filter((i) => i.status === 'pending').length;
   return (
     <>
-      <PageTitle title="Deadlines" subtitle={`${pending} pending`} />
+      <PageTitle title="Deadlines" subtitle={pending === 1 ? '1 remaining' : `${pending} remaining`} />
       <DeadlinesView
         items={state.items}
         kinds={state.kinds}

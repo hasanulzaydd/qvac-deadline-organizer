@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Card, EmptyState, ItemRow, PageTitle, SectionTitle, buttonClass } from '@/components/ui';
 import { readState } from '@/lib/store';
-import { DAY_NAMES, formatClock, formatDateTime, pad, relativeDay } from '@/lib/time';
+import { DAY_NAMES, formatClock, pad } from '@/lib/time';
 import { byDueAt, courseTitle, courseTone } from '@/lib/view';
 
 // data.json changes at runtime; never prerender this page.
@@ -24,10 +24,6 @@ export default async function Dashboard() {
     .filter((i) => i.status === 'pending' && new Date(i.dueAt).getTime() <= horizon)
     .sort(byDueAt);
 
-  const notices = [...state.notices]
-    .sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime())
-    .slice(0, 5);
-
   return (
     <>
       <PageTitle
@@ -35,7 +31,7 @@ export default async function Dashboard() {
         subtitle={now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
         action={
           <Link href="/add" className={`${buttonClass.primary} px-5 py-2.5 text-base`}>
-            + Add screenshot or text
+            + Add screenshot
           </Link>
         }
       />
@@ -109,30 +105,6 @@ export default async function Dashboard() {
               </ul>
             </Card>
           )}
-
-          <div className="mt-6">
-            <SectionTitle>Recent notices</SectionTitle>
-            {notices.length === 0 ? (
-              <EmptyState>No notices.</EmptyState>
-            ) : (
-              <Card>
-                <ul className="divide-y divide-zinc-100">
-                  {notices.map((n) => {
-                    const course = n.courseId ? courses.get(n.courseId) : undefined;
-                    return (
-                      <li key={n.id} className="px-4 py-3">
-                        <p className="text-sm">{n.text}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {course ? `${course.code} · ` : ''}
-                          {formatDateTime(n.postedAt)} · {relativeDay(n.postedAt, now)}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Card>
-            )}
-          </div>
         </section>
       </div>
     </>

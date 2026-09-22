@@ -1,8 +1,7 @@
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Course, Item, Kind } from '@/lib/schema';
-import { formatDateTime, relativeDay } from '@/lib/time';
-import { dueWord, isOverdue } from '@/lib/view';
+import { relativeDay } from '@/lib/time';
+import { formatDue, isOverdue } from '@/lib/view';
 
 /** Presentational pieces with no hooks, usable from server and client components. */
 
@@ -80,23 +79,14 @@ export function ItemRow({
         <div className="flex flex-wrap items-center gap-2">
           <span className={`font-medium ${done ? 'line-through' : ''}`}>{item.title}</span>
           <KindChip kind={kind} />
-          {course && (
-            <Link href={`/courses/${course.id}`} className="text-xs font-medium text-zinc-500 hover:text-zinc-900">
-              {course.code}
-            </Link>
-          )}
+          {course && <span className="text-xs font-medium text-zinc-500">{course.code}</span>}
         </div>
         <div className={`mt-0.5 text-sm ${overdue ? 'font-medium text-red-700' : 'text-zinc-600'}`}>
           {overdue ? 'Overdue · ' : ''}
-          {dueWord(kind)} {formatDateTime(item.dueAt)}
+          {formatDue(item.dueAt, kind)}
           <span className="text-zinc-400"> · {relativeDay(item.dueAt, now)}</span>
         </div>
-        {(item.syllabus || item.instructions) && (
-          <div className="mt-1 space-y-0.5 text-sm text-zinc-500">
-            {item.syllabus && <p>{item.syllabus}</p>}
-            {item.instructions && <p className="italic">{item.instructions}</p>}
-          </div>
-        )}
+        {item.syllabus && <p className="mt-1 text-sm text-zinc-500">{item.syllabus}</p>}
       </div>
     </li>
   );
