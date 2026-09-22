@@ -10,6 +10,9 @@ next-env.d.ts
 # qvac model cache
 .qvac
 
+# machine-specific QVAC settings (e.g. a custom model cache path)
+qvac.config.json
+
 # local storage — the app's entire database
 data.json
 
@@ -21,3 +24,4 @@ tmp/
 
 # misc
 .DS_Store
+
