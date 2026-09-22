@@ -9,6 +9,7 @@ import { getQvac } from './qvac';
 import { normaliseCode, type Proposal } from './proposal';
 import type { AppState, Course, Kind } from './schema';
 import { newId } from './store';
+import { DAY_NAMES, localDate, localIsoNow, toLocalIso } from './time';
 
 /**
  * Ingest pipeline: image → OCR → classify → extract → validate → proposal.
@@ -231,7 +232,7 @@ const calendarDate = z
     const dt = new Date(Date.UTC(y, m - 1, day));
     return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === day;
   }, 'not a real calendar date');
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+const DAYS = DAY_NAMES;
 
 function itemExtractSchema(kinds: Kind[]) {
   const names = kinds.map((k) => k.name);
@@ -404,29 +405,6 @@ Include every class meeting you can see. Copy facts from the text only.`,
 // Step 5: map model output → proposal (ids, local timestamps, warnings)
 // ---------------------------------------------------------------------------
 
-function pad(n: number) {
-  return String(n).padStart(2, '0');
-}
-
-function localDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** "2026-10-14" + "23:59" → "2026-10-14T23:59:00+06:00" in the server's local zone. */
-function toLocalIso(date: string, time: string): string {
-  const [y, mo, d] = date.split('-').map(Number);
-  const [h, mi] = time.split(':').map(Number);
-  const local = new Date(y, mo - 1, d, h, mi);
-  const offsetMin = -local.getTimezoneOffset();
-  const sign = offsetMin >= 0 ? '+' : '-';
-  const abs = Math.abs(offsetMin);
-  return `${date}T${time}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-}
-
-function localIsoNow(now: Date): string {
-  return toLocalIso(localDate(now), `${pad(now.getHours())}:${pad(now.getMinutes())}`);
-}
-
 function findCourse(courses: Course[], code: string | null): Course | undefined {
   if (!code) return undefined;
   const key = normaliseCode(code);
@@ -541,7 +519,10 @@ function routineToProposal(
     return course;
   };
 
-  for (const c of out.courses) addCourse(c);
+  for (const c of out.courses) {
+    // Small models fill a missing title with the code itself; that is "no title".
+    addCourse(normaliseCode(c.title) === normaliseCode(c.code) ? { ...c, title: '' } : c);
+  }
 
   const slots = out.slots.map((s, i) => {
     let course = byCode.get(normaliseCode(s.courseCode));
@@ -562,9 +543,21 @@ function routineToProposal(
     };
   });
 
+  // Saving updates a matching saved course with what this screenshot says.
+  // Name every field that would change, so a fix the user made earlier (say,
+  // a room OCR misread) is never silently overwritten by the same misread.
   for (const c of courses) {
-    if (findCourse(state.courses, c.code)) {
-      warnings.push(`course ${c.code} already exists — saving will update its details`);
+    const saved = findCourse(state.courses, c.code);
+    if (!saved) continue;
+    for (const field of ['title', 'section', 'faculty', 'room'] as const) {
+      if (c[field] !== saved[field] && saved[field]) {
+        warnings.push(
+          `course ${c.code}: ${field} reads "${c[field]}" here but you saved "${saved[field]}" — saving will overwrite it`,
+        );
+      }
+    }
+    if (c.isLab !== saved.isLab) {
+      warnings.push(`course ${c.code}: lab flag differs from your saved course — saving will overwrite it`);
     }
   }
   return { type: 'routine', courses, slots };
