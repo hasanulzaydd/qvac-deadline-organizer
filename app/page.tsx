@@ -1,164 +1,140 @@
-'use client';
+import Link from 'next/link';
+import { Card, EmptyState, ItemRow, PageTitle, SectionTitle, buttonClass } from '@/components/ui';
+import { readState } from '@/lib/store';
+import { DAY_NAMES, formatClock, formatDateTime, pad, relativeDay } from '@/lib/time';
+import { byDueAt, courseTitle, courseTone } from '@/lib/view';
 
-import { useEffect, useState } from 'react';
+// data.json changes at runtime; never prerender this page.
+export const dynamic = 'force-dynamic';
 
-type Named = { id: string; name?: string; code?: string };
-type StateSummary = { kinds: Named[]; courses: Named[] };
+export default async function Dashboard() {
+  const state = await readState();
+  const now = new Date();
+  const nowClock = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const kinds = new Map(state.kinds.map((k) => [k.id, k]));
+  const courses = new Map(state.courses.map((c) => [c.id, c]));
 
-export default function Home() {
-  const [pasted, setPasted] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('');
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-  const [draft, setDraft] = useState('');
-  const [saveMsg, setSaveMsg] = useState('');
-  const [lookup, setLookup] = useState<StateSummary | null>(null);
+  const todaysClasses = state.routine
+    .filter((s) => s.day === now.getDay())
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  async function refreshLookup() {
-    const res = await fetch('/api/state');
-    if (res.ok) setLookup(await res.json());
-  }
+  // Next 7 days, plus anything overdue that is still pending.
+  const horizon = now.getTime() + 7 * 86_400_000;
+  const upcoming = state.items
+    .filter((i) => i.status === 'pending' && new Date(i.dueAt).getTime() <= horizon)
+    .sort(byDueAt);
 
-  useEffect(() => {
-    // Initial fetch of kinds/courses for the id reference list.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refreshLookup();
-  }, []);
-
-  async function extract() {
-    const body = new FormData();
-    if (file) body.append('image', file);
-    else body.append('text', pasted);
-
-    setBusy(true);
-    setStatus(file ? 'running OCR + extraction…' : 'running extraction…');
-    setResult(null);
-    setDraft('');
-    setSaveMsg('');
-    try {
-      const res = await fetch('/api/ingest', { method: 'POST', body });
-      const data = await res.json();
-      setResult(data);
-      setDraft(data.proposal ? JSON.stringify(data.proposal, null, 2) : '');
-      setStatus(data.ok ? `proposal ready (HTTP ${res.status})` : `failed (HTTP ${res.status})`);
-    } catch (err) {
-      setStatus(`request failed: ${String(err)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function save() {
-    let proposal: unknown;
-    try {
-      proposal = JSON.parse(draft);
-    } catch (err) {
-      setSaveMsg(`not valid JSON: ${String(err)}`);
-      return;
-    }
-    setBusy(true);
-    try {
-      const post = (replaceRoutine: boolean) =>
-        fetch(`/api/confirm${replaceRoutine ? '?replaceRoutine=true' : ''}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(proposal),
-        });
-      let res = await post(false);
-      let data = await res.json();
-      // A new routine replaces the whole saved one — ask before doing that.
-      if (res.status === 409 && data.needsReplaceConfirmation) {
-        const ok = window.confirm(
-          `You already have a routine with ${data.existingSlots} class slot(s). ` +
-            'Saving this one will replace the whole routine. Continue?',
-        );
-        if (!ok) {
-          setSaveMsg('not saved: existing routine kept');
-          return;
-        }
-        res = await post(true);
-        data = await res.json();
-      }
-      setSaveMsg(data.ok ? `saved:\n${JSON.stringify(data.saved, null, 2)}` : `not saved:\n${data.issues.join('\n')}`);
-      if (data.ok) void refreshLookup();
-    } finally {
-      setBusy(false);
-    }
-  }
+  const notices = [...state.notices]
+    .sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime())
+    .slice(0, 5);
 
   return (
-    <div style={{ padding: 16, fontFamily: 'monospace' }}>
-      <h1>Ingest</h1>
+    <>
+      <PageTitle
+        title={DAY_NAMES[now.getDay()]}
+        subtitle={now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+        action={
+          <Link href="/add" className={`${buttonClass.primary} px-5 py-2.5 text-base`}>
+            + Add screenshot or text
+          </Link>
+        }
+      />
 
-      <p>Paste text:</p>
-      <textarea rows={6} cols={90} value={pasted} onChange={(e) => setPasted(e.target.value)} disabled={busy || !!file} />
+      <div className="grid gap-6 lg:grid-cols-5">
+        <section className="lg:col-span-2">
+          <SectionTitle>Today&apos;s classes</SectionTitle>
+          {todaysClasses.length === 0 ? (
+            <EmptyState>
+              {state.routine.length === 0 ? (
+                <>
+                  No routine yet. <Link href="/add" className="font-medium text-indigo-600">Add your routine</Link>
+                </>
+              ) : (
+                'No classes today.'
+              )}
+            </EmptyState>
+          ) : (
+            <ol className="space-y-2">
+              {todaysClasses.map((slot) => {
+                const course = courses.get(slot.courseId);
+                const past = slot.endTime <= nowClock;
+                const live = slot.startTime <= nowClock && nowClock < slot.endTime;
+                return (
+                  <li
+                    key={slot.id}
+                    className={`rounded-xl border px-4 py-3 ${course ? courseTone(course.code) : 'bg-white border-zinc-200'} ${
+                      past ? 'opacity-50' : ''
+                    } ${live ? 'ring-2 ring-indigo-500' : ''}`}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-semibold">{course?.code ?? 'Unknown course'}</span>
+                      <span className="text-sm tabular-nums">
+                        {formatClock(slot.startTime)} – {formatClock(slot.endTime)}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-sm opacity-80">
+                      {[courseTitle(course), slot.room || course?.room, live ? 'Now' : null].filter(Boolean).join(' · ')}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </section>
 
-      <p>
-        or upload a screenshot:{' '}
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} disabled={busy} />
-      </p>
-
-      <button onClick={extract} disabled={busy || (!file && !pasted.trim())}>
-        Extract
-      </button>{' '}
-      <span>{status}</span>
-
-      {result && (
-        <>
-          <h2>Result</h2>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>
-            {`type: ${result.type}   attempts: ${result.attempts}   timings: ${JSON.stringify(result.timings)}`}
-            {result.error ? `\nerror: ${result.error}` : ''}
-          </pre>
-          {Array.isArray(result.warnings) && result.warnings.length > 0 && (
-            <>
-              <h3>Warnings — check these before saving</h3>
-              <ul>
-                {(result.warnings as string[]).map((w, i) => (
-                  <li key={i}>{w}</li>
+        <section className="lg:col-span-3">
+          <SectionTitle
+            action={
+              <Link href="/deadlines" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                All deadlines →
+              </Link>
+            }
+          >
+            Next 7 days
+          </SectionTitle>
+          {upcoming.length === 0 ? (
+            <EmptyState>Nothing due in the next 7 days.</EmptyState>
+          ) : (
+            <Card className="overflow-hidden">
+              <ul className="divide-y divide-zinc-100">
+                {upcoming.map((item) => (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    kind={kinds.get(item.kindId)}
+                    course={item.courseId ? courses.get(item.courseId) : undefined}
+                    now={now}
+                  />
                 ))}
               </ul>
-            </>
+            </Card>
           )}
-          <h3>Source text</h3>
-          <pre style={{ whiteSpace: 'pre-wrap', background: '#eee', padding: 8 }}>{String(result.sourceText ?? '')}</pre>
-          {typeof result.modelText === 'string' && result.modelText !== result.sourceText && (
-            <>
-              <h3>What the model read (layout rebuilt, OCR digits fixed)</h3>
-              <pre style={{ whiteSpace: 'pre-wrap', background: '#eef', padding: 8 }}>{result.modelText}</pre>
-            </>
-          )}
-          {typeof result.rawOutput === 'string' && (
-            <>
-              <h3>Raw model output</h3>
-              <pre style={{ whiteSpace: 'pre-wrap' }}>{result.rawOutput}</pre>
-            </>
-          )}
-        </>
-      )}
 
-      {draft && (
-        <>
-          <h2>Proposal (edit, then save)</h2>
-          <textarea rows={30} cols={110} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy} />
-          <br />
-          <button onClick={save} disabled={busy}>
-            Save
-          </button>
-        </>
-      )}
-      {saveMsg && <pre style={{ whiteSpace: 'pre-wrap' }}>{saveMsg}</pre>}
-
-      {lookup && (
-        <>
-          <h2>Reference ids</h2>
-          <pre>
-            {'kinds:\n' + lookup.kinds.map((k) => `  ${k.id}  ${k.name}`).join('\n')}
-            {'\ncourses:\n' + (lookup.courses.map((c) => `  ${c.id}  ${c.code}`).join('\n') || '  (none)')}
-          </pre>
-        </>
-      )}
-    </div>
+          <div className="mt-6">
+            <SectionTitle>Recent notices</SectionTitle>
+            {notices.length === 0 ? (
+              <EmptyState>No notices.</EmptyState>
+            ) : (
+              <Card>
+                <ul className="divide-y divide-zinc-100">
+                  {notices.map((n) => {
+                    const course = n.courseId ? courses.get(n.courseId) : undefined;
+                    return (
+                      <li key={n.id} className="px-4 py-3">
+                        <p className="text-sm">{n.text}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {course ? `${course.code} · ` : ''}
+                          {formatDateTime(n.postedAt)} · {relativeDay(n.postedAt, now)}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            )}
+          </div>
+        </section>
+      </div>
+    </>
   );
 }
